@@ -1,0 +1,26 @@
+{
+  "name": "natsjetstream-sandbox",
+  "version": "1.0.0",
+  "description": "Sandbox for playing with Jetstream",
+  "main": "index.js",
+  "scripts": {
+    "preinstall": "mkdir -p ./bin",
+    "setup": "mkdir -p build && npm run setup:nats-server && npm run setup:jetstream-tools",
+    "setup:nats-server": "rm -Rf build/nats-server && git clone  --branch=jetstream https://github.com/nats-io/nats-server build/nats-server && cd build/nats-server && go build && cp nats-server ../../bin/",
+    "setup:jetstream-tools": "rm -Rf build/jetstream && git clone https://github.com/nats-io/jetstream build/jetstream && cd build/jetstream/nats && go build && cp nats ../../../bin/",
+    "test": "node src/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com//aricart/natsjetstream-sandbox"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "nats": "^2.0.0-25",
+    "underscore": "^1.10.2"
+  },
+  "devDependencies": {
+    "standard": "^14.3.3"
+  }
+}
