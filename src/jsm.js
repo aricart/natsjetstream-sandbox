@@ -31,7 +31,6 @@ const ReplayPolicy = Object.freeze({
   Original: 'original'
 })
 
-
 const _streamTemplate = Object.freeze({
   retention: RetentionPolicy.Limits,
   max_consumers: -1,
@@ -59,23 +58,41 @@ class Consumer {
     this.jsm = jsm
   }
 
+  ok (msg) {
+    msg.respond('+OK')
+  }
+
+  nak (msg) {
+    msg.respond('-NAK')
+  }
+
+  progress (msg) {
+    msg.respond('+WPI')
+  }
+
+  next (msg) {
+    msg.respond('+NXT')
+  }
+
   _request (verb, stream, durable, payload) {
     if (!verb) {
       return Promise.reject(new Error('verb is required'))
     }
-    if (!stream) {
-      return Promise.reject(new Error('stream name is required'))
+    if (verb !== 'CONSUMERS' && !stream) {
+      return Promise.reject(new Error('stream is required'))
     }
-    if (verb !== 'CONSUMERS' && !durable) {
-      return Promise.reject(new Error('stream name is required'))
+    if (verb !== 'EPHEMERAL' && verb !== 'CONSUMERS' && !durable) {
+      return Promise.reject(new Error('durable is required'))
     }
+
     let subj = ''
     switch (verb) {
       case 'CONSUMERS':
         subj = `$JS.STREAM.${stream}.CONSUMERS`
         break
       case 'EPHEMERAL':
-        subj = '$JS.STREAM.%s.EPHEMERAL.CONSUMER.CREATE'
+        subj = `$JS.STREAM.${stream}.EPHEMERAL.CONSUMER.CREATE`
+        break
       default:
         subj = `$JS.STREAM.${stream}.CONSUMER.${durable}.${verb}`
     }
@@ -83,12 +100,43 @@ class Consumer {
     return this.jsm._request(subj, payload ? JSON.stringify(payload) : '')
   }
 
-  create (stream, durable, spec) {
-    spec = spec || {}
-    spec = _.extend(spec, _consumerTemplate, {durable_name: durable})
-    const opts = { stream_name: stream, config: spec }
-    console.info(opts)
-    return this._request('CREATE', stream, durable, opts)
+  create (stream, opts) {
+    opts = opts || {}
+    const config = _.extend({}, _consumerTemplate, opts)
+    const payload = { stream_name: stream, config: config }
+    if (payload.config.durable_name) {
+      return this._request('CREATE', stream, payload.config.durable_name, payload)
+    } else {
+      return this._request('EPHEMERAL', stream, '', payload)
+    }
+  }
+
+  info (stream, optDurable) {
+    return new Promise((resolve, reject) => {
+      this._request('INFO', stream, optDurable)
+        .then((v) => {
+          resolve((JSON.parse(v)))
+        })
+        .catch((err) => {
+          reject(err)
+        })
+    })
+  }
+
+  pullSubject (stream, durable) {
+    return `$JS.STREAM.${stream}.CONSUMER.${durable}.NEXT`
+  }
+
+  list (stream) {
+    return new Promise((resolve, reject) => {
+      this._request('CONSUMERS', stream)
+        .then((v) => {
+          return resolve(JSON.parse(v))
+        })
+        .catch((err) => {
+          reject(err)
+        })
+    })
   }
 }
 
@@ -114,9 +162,9 @@ class Stream {
     return this.jsm._request(subj, payload ? JSON.stringify(payload) : '')
   }
 
-  create (spec) {
-    const payload = _.extend(spec, _streamTemplate)
-    return this._request('CREATE', spec.name, payload)
+  create (name, spec) {
+    const payload = _.extend({}, _streamTemplate, { name: name }, spec)
+    return this._request('CREATE', payload.name, payload)
   }
 
   delete (name) {
@@ -155,7 +203,7 @@ class Stream {
 class JSM {
   constructor (nc) {
     if (nc.options.payload !== NATS.Payload.String) {
-      throw ('JSM requires string payloads')
+      throw new Error('JSM requires string payloads')
     }
     this.nc = nc
     this.stream = new Stream(this)
@@ -184,8 +232,8 @@ class JSM {
     if (m === '+OK') {
       return true
     }
-    if (m.indexOf('+OK \'') === 0) {
-      return m.substring(6, m.length - 1)
+    if (m.indexOf('+OK ') === 0) {
+      return m.substring(4, m.length)
     }
     return m
   }
@@ -197,4 +245,17 @@ class JSM {
   }
 }
 
-module.exports = {JSM: JSM}
+module.exports = {
+  JSM: JSM,
+  opts: {
+    stream: {
+      RetentionPolicy: RetentionPolicy,
+      StorageType: StorageType
+    },
+    consumer: {
+      DeliverPolicy: DeliverPolicy,
+      AckPolicy: AckPolicy,
+      ReplayPolicy: ReplayPolicy
+    }
+  }
+}
