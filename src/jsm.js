@@ -42,6 +42,13 @@ const _streamTemplate = Object.freeze({
   no_ack: false
 })
 
+// const streamTemplates = Object.freeze({
+//   create: "$JS.API.STREAM.TEMPLATE.CREATE.{name}",
+//   info: "$JS.API.STREAM.TEMPLATE.INFO.{name}",
+//   delete: "$JS.API.STREAM.TEMPLATE.DELETE.{name}",
+//   names: "$JS.API.STREAM.TEMPLATE.NAMES",
+// })
+
 function ns (millis) {
   return millis * 1000000
 }
@@ -53,11 +60,7 @@ const _consumerTemplate = Object.freeze({
   replay_policy: ReplayPolicy.Instant
 })
 
-class Consumer {
-  constructor (jsm) {
-    this.jsm = jsm
-  }
-
+class Acker {
   ok (msg) {
     msg.respond('+OK')
   }
@@ -73,65 +76,46 @@ class Consumer {
   next (msg) {
     msg.respond('+NXT')
   }
+}
 
-  _request (verb, stream, durable, payload) {
-    if (!verb) {
-      return Promise.reject(new Error('verb is required'))
-    }
-    if (verb !== 'CONSUMERS' && !stream) {
-      return Promise.reject(new Error('stream is required'))
-    }
-    if (verb !== 'EPHEMERAL' && verb !== 'CONSUMERS' && !durable) {
-      return Promise.reject(new Error('durable is required'))
-    }
-
-    let subj = ''
-    switch (verb) {
-      case 'CONSUMERS':
-        subj = `$JS.STREAM.${stream}.CONSUMERS`
-        break
-      case 'EPHEMERAL':
-        subj = `$JS.STREAM.${stream}.EPHEMERAL.CONSUMER.CREATE`
-        break
-      default:
-        subj = `$JS.STREAM.${stream}.CONSUMER.${durable}.${verb}`
-    }
-
-    return this.jsm._request(subj, payload ? JSON.stringify(payload) : '')
+class Worker extends Acker {
+  constructor (jsm, stream, opts) {
+    super()
+    this.jsm = jsm
+    this.stream = stream
+    this.opts = opts
   }
 
-  create (stream, opts) {
-    opts = opts || {}
-    const config = _.extend({}, _consumerTemplate, opts)
-    const payload = { stream_name: stream, config: config }
-    if (payload.config.durable_name) {
-      return this._request('CREATE', stream, payload.config.durable_name, payload)
-    } else {
-      return this._request('EPHEMERAL', stream, '', payload)
+  pullGenerator () {
+    const { jsm, stream, opts } = this
+    if (!opts.durable_name) {
+      return Promise.reject(new Error('`durable_name` option is required'))
     }
-  }
+    opts.timeout = opts.timeout || 1000
+    opts.noMuxRequests = true
 
-  info (stream, optDurable) {
     return new Promise((resolve, reject) => {
-      this._request('INFO', stream, optDurable)
-        .then((v) => {
-          resolve((JSON.parse(v)))
+      jsm.consumers.info(stream, opts.durable_name)
+        .catch(() => {
+          // we have no consumer, create it
+          return jsm.consumers.create(stream, opts)
         })
-        .catch((err) => {
-          reject(err)
-        })
-    })
-  }
-
-  pullSubject (stream, durable) {
-    return `$JS.STREAM.${stream}.CONSUMER.${durable}.NEXT`
-  }
-
-  list (stream) {
-    return new Promise((resolve, reject) => {
-      this._request('CONSUMERS', stream)
-        .then((v) => {
-          return resolve(JSON.parse(v))
+        .then(() => {
+          const fn = async function * () {
+            const subj = jsm.consumers.pullSubject(stream, opts.durable_name)
+            while (true) {
+              const t = await new Promise((resolve) => {
+                jsm.nc.request(subj, (err, msg) => {
+                  if (err) {
+                    resolve({ error: err, msg: null })
+                  }
+                  resolve({ error: null, msg: msg })
+                }, '', opts)
+              })
+              yield t
+            }
+          }
+          resolve(fn())
         })
         .catch((err) => {
           reject(err)
@@ -140,7 +124,73 @@ class Consumer {
   }
 }
 
-class Stream {
+class ConsumerAPI {
+  constructor (jsm) {
+    this.jsm = jsm
+  }
+
+  _request (verb, stream, durable, payload) {
+    if (!verb) {
+      return Promise.reject(new Error('verb is required'))
+    }
+    if (verb !== 'list' && !stream) {
+      return Promise.reject(new Error('streams is required'))
+    }
+    if (verb === 'create' && durable) {
+      verb = 'durable'
+    }
+    if (!durable) {
+      durable = ''
+    }
+    const subjects = {
+      create: `$JS.API.CONSUMER.CREATE.${stream}`,
+      durable: `$JS.API.CONSUMER.DURABLE.CREATE.${stream}.${durable}`,
+      delete: `$JS.API.CONSUMER.DELETE.${stream}.${durable}`,
+      info: `$JS.API.CONSUMER.INFO.${stream}.${durable}`,
+      list: `$JS.API.CONSUMER.LIST.${stream}`,
+      names: `$JS.API.CONSUMER.NAMES.${stream}`
+    }
+
+    return this.jsm._request(subjects[verb], payload)
+  }
+
+  create (stream, opts) {
+    opts = opts || {}
+    const config = _.extend({}, _consumerTemplate, opts)
+    const payload = { stream_name: stream, config: config }
+    return this._request('durable', stream, payload.config.durable_name, payload)
+  }
+
+  info (stream, optDurable) {
+    return new Promise((resolve, reject) => {
+      this._request('info', stream, optDurable)
+        .then((v) => {
+          resolve(v)
+        })
+        .catch((err) => {
+          reject(err)
+        })
+    })
+  }
+
+  pullSubject (stream, durable) {
+    return `$JS.API.CONSUMER.MSG.NEXT.${stream}.${durable}`
+  }
+
+  list (stream) {
+    return new Promise((resolve, reject) => {
+      this._request('list', stream)
+        .then((v) => {
+          resolve(v)
+        })
+        .catch((err) => {
+          reject(err)
+        })
+    })
+  }
+}
+
+class StreamAPI {
   constructor (jsm) {
     this.jsm = jsm
   }
@@ -149,37 +199,55 @@ class Stream {
     if (!verb) {
       return Promise.reject(new Error('verb is required'))
     }
-    let subj = ''
-    if (verb === 'LIST') {
-      subj = `$JS.STREAM.${verb}`
-    } else {
-      if (!stream) {
-        return Promise.reject(new Error('stream name is required'))
-      }
-      subj = `$JS.STREAM.${stream}.${verb}`
+
+    if (verb === 'list') {
+      stream = ''
     }
 
-    return this.jsm._request(subj, payload ? JSON.stringify(payload) : '')
+    const subjects = {
+      create: `$JS.API.STREAM.CREATE.${stream}`,
+      update: `$JS.API.STREAM.UPDATE.${stream}`,
+      names: '$JS.API.STREAM.NAMES',
+      list: '$JS.API.STREAM.LIST',
+      info: `$JS.API.STREAM.INFO.${stream}`,
+      delete: `$JS.API.STREAM.DELETE.${stream}`,
+      purge: `$JS.API.STREAM.PURGE.${stream}`,
+      get: `$JS.API.STREAM.GET.${stream}`
+    }
+
+    return this.jsm._request(subjects[verb], payload)
   }
 
   create (name, spec) {
     const payload = _.extend({}, _streamTemplate, { name: name }, spec)
-    return this._request('CREATE', payload.name, payload)
+    return this._request('create', payload.name, payload)
   }
 
   delete (name) {
-    return this._request('DELETE', name)
+    return this._request('delete', name)
   }
 
   purge (name) {
-    return this._request('PURGE', name)
+    return this._request('purge', name)
   }
 
   list () {
     return new Promise((resolve, reject) => {
-      this._request('LIST')
+      this._request('list')
         .then((v) => {
-          return resolve(JSON.parse(v))
+          resolve(v)
+        })
+        .catch((err) => {
+          reject(err)
+        })
+    })
+  }
+
+  names () {
+    return new Promise((resolve, reject) => {
+      this._request('names')
+        .then((v) => {
+          return resolve(v.streams)
         })
         .catch((err) => {
           reject(err)
@@ -189,9 +257,9 @@ class Stream {
 
   info (name) {
     return new Promise((resolve, reject) => {
-      this._request('INFO', name)
+      this._request('info', name)
         .then((v) => {
-          return resolve(JSON.parse(v))
+          resolve(v)
         })
         .catch((err) => {
           reject(err)
@@ -202,51 +270,39 @@ class Stream {
 
 class JSM {
   constructor (nc) {
-    if (nc.options.payload !== NATS.Payload.String) {
-      throw new Error('JSM requires string payloads')
+    if (nc.options.payload !== NATS.Payload.Binary) {
+      throw new Error('JSM requires Binary payloads')
     }
     this.nc = nc
-    this.stream = new Stream(this)
-    this.consumer = new Consumer(this)
+    this.streams = new StreamAPI(this)
+    this.consumers = new ConsumerAPI(this)
   }
 
   _request (subj, payload) {
     return new Promise((resolve, reject) => {
+      if (payload) {
+        payload = JSON.stringify(payload)
+      }
+
       this.nc.request(subj, (err, msg) => {
         if (err) {
           reject(err)
           return
         }
-
-        const jerr = this._isError(msg.data)
-        if (jerr) {
-          reject(new Error(jerr))
-          return
+        msg.data = JSON.parse(msg.data)
+        if (msg.data.error) {
+          console.error('request', subj, 'failed', msg.data.error)
+          reject(new Error(msg.data.error.description))
         }
-        return resolve(this._getData(msg.data))
+        resolve(msg.data)
       }, payload)
     })
-  }
-
-  _getData (m) {
-    if (m === '+OK') {
-      return true
-    }
-    if (m.indexOf('+OK ') === 0) {
-      return m.substring(4, m.length)
-    }
-    return m
-  }
-
-  _isError (m) {
-    if (m.indexOf('-ERR \'') === 0) {
-      return m.substring(6, m.length - 1)
-    }
   }
 }
 
 module.exports = {
   JSM: JSM,
+  Worker: Worker,
   opts: {
     stream: {
       RetentionPolicy: RetentionPolicy,

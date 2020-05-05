@@ -1,4 +1,7 @@
 .idea/
-.ipynb_checkpoitns/
+.ipynb_checkpoints/
+.nyc_output/
+jetstream.ipynb
 bin/
 build/
+tmp/
