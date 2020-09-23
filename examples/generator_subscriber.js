@@ -1,45 +1,42 @@
-const NATS = require('nats')
+const NATS = require("nats");
 
-const nc = NATS.connect()
-nc.on('err', (err) => {
-  console.log(err)
-})
+const nc = NATS.connect();
+nc.on("err", (err) => {
+  console.log(err);
+});
 
-
-
-nc.on('connect', async () => {
-  function *feeder() {
-    while(true) {
-      yield
-      const v = yield
-      yield v
+nc.on("connect", async () => {
+  function* feeder() {
+    while (true) {
+      yield;
+      const v = yield;
+      yield v;
     }
   }
 
-  const j = feeder()
+  const j = feeder();
 
-  console.debug('connected')
+  console.debug("connected");
 
-  async function *msgs() {
-    while(true) {
-      yield *feeder()
+  async function* msgs() {
+    while (true) {
+      yield* feeder();
     }
   }
 
-  const i = msgs()
-  i.next()
+  const i = msgs();
+  i.next();
 
-  nc.subscribe('foo', (err, msg) => {
-    console.log('got one')
-    j.next()
-    j.next({err, msg})
-  })
+  nc.subscribe("foo", (err, msg) => {
+    console.log("got one");
+    j.next();
+    j.next({ err, msg });
+  });
 
   for await (let v of i) {
-    console.log('>', v)
+    console.log(">", v);
   }
-})
-
+});
 
 // function foo(x, y) {
 //   ajax(`http://someurl.1/?x=${x}&y=${y}`,
@@ -63,7 +60,6 @@ nc.on('connect', async () => {
 //   var it = main();
 //   it.next()
 // }
-
 
 // function *foo() {
 //   var y = (yield)
