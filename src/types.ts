@@ -20,7 +20,7 @@ export interface StreamAPI {
   delete(name: string): Promise<boolean>;
   purge(name: string): Promise<boolean>;
   info(name: string): Promise<Stream>;
-  get(name: string, sequence: number): Promise<any>;
+  get(name: string, sequence: number): Promise<StreamMessage>;
 }
 
 export enum RetentionPolicy {
