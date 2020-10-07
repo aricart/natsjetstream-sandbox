@@ -18,6 +18,7 @@ import {
   StreamNames,
   Streams,
   ms,
+  StreamMessage,
 } from "./types.ts";
 
 export function jsmClient(nc: NatsConnection): JSM {
@@ -152,6 +153,15 @@ export class StreamAPIImpl implements StreamAPI {
     return response.success;
   }
 
+  async get(name: string, sequence: number): Promise<StreamMessage> {
+    const d = await this._request("get", name, { seq: sequence });
+    if (d.message?.data) {
+      const te = new TextEncoder();
+      d.message.data = te.encode(atob(d.message.data));
+    }
+    return d.message as StreamMessage;
+  }
+
   info(name: string): Promise<Stream> {
     return this._request("info", name);
   }
@@ -173,7 +183,7 @@ export class StreamAPIImpl implements StreamAPI {
     m.set("info", `$JS.API.STREAM.INFO.${stream}`);
     m.set("delete", `$JS.API.STREAM.DELETE.${stream}`);
     m.set("purge", `$JS.API.STREAM.PURGE.${stream}`);
-    m.set("get", `$JS.API.STREAM.GET.${stream}`);
+    m.set("get", `$JS.API.STREAM.MSG.GET.${stream}`);
 
     const subject = m.get(verb);
     if (!subject) {

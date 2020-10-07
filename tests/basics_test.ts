@@ -1,8 +1,13 @@
-import { NatsServer } from "https://raw.githubusercontent.com/nats-io/nats.deno/main/tests/helpers/mod.ts";
+import {
+  NatsServer,
+  Lock,
+} from "https://raw.githubusercontent.com/nats-io/nats.deno/main/tests/helpers/mod.ts";
 import {
   connect,
+  ErrorCode,
   createInbox,
   StringCodec,
+  JSONCodec,
 } from "https://raw.githubusercontent.com/nats-io/nats.deno/main/src/mod.ts";
 import {
   assert,
@@ -19,6 +24,8 @@ import { JsMsgImpl, PullConsumer, PushConsumer } from "../src/consumer.ts";
 import { JsmImpl, pullSubject } from "../src/jsm.ts";
 
 const jsopts = {
+  // debug: true,
+  // trace: true,
   jetstream: {
     max_memory_store: 1024 * 1024,
     max_file_store: 1,
@@ -46,9 +53,20 @@ Deno.test("basics - stream crud", async () => {
   streams = await jsm.streams.list();
   assertEquals(streams.streams.length, 1);
 
+  const jc = JSONCodec();
+  await nc.request(
+    "foo",
+    jc.encode({ key: "value" }),
+    { noMux: true, timeout: 1000 },
+  );
+
   const stream = await jsm.streams.info("foo");
   assertEquals(stream.config, streams.streams[0].config);
   assertEquals(s.config, stream.config);
+
+  const m = await jsm.streams.get("foo", 1);
+  const p = jc.decode(m.data);
+  assertEquals({ key: "value" }, p);
 
   assert(await jsm.streams.delete("foo"));
   streams = await jsm.streams.list();
@@ -150,10 +168,13 @@ Deno.test("basics - pull consumer", async () => {
         } - reply: ${jm.reply}`,
       );
       if (consumer.getPending() <= 20) {
-        jm.ok();
+        jm.ack();
         await consumer.next(80);
       } else {
         jm.next();
+      }
+      if (jm.seq === 1000) {
+        break;
       }
     }
   })();

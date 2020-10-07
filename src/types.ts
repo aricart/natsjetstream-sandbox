@@ -20,6 +20,7 @@ export interface StreamAPI {
   delete(name: string): Promise<boolean>;
   purge(name: string): Promise<boolean>;
   info(name: string): Promise<Stream>;
+  get(name: string, sequence: number): Promise<any>;
 }
 
 export enum RetentionPolicy {
@@ -102,6 +103,13 @@ export interface JSResponse {
 
 export interface StreamNames extends IterableResponse {
   streams: string[];
+}
+
+export interface StreamMessage {
+  subject: string;
+  seq: number;
+  data: Uint8Array;
+  time: string;
 }
 
 export interface IterableRequest {
@@ -214,7 +222,7 @@ export interface JsMsg {
   info: DeliveryInfo;
   seq: number;
 
-  ok(): void;
+  ack(): void;
   nak(): void;
   working(): void;
   next(): void;

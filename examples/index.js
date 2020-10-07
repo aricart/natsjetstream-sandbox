@@ -51,7 +51,7 @@ nc.on("connect", async () => {
     console.log("> visitor consumers", msg.subject, msg.data);
     nc.publish(`worker.${msg.subject.split(".")[1]}`, msg.data);
     if (msg.reply) {
-      msg.respond("+OK");
+      msg.respond("+ACK");
     }
   });
 

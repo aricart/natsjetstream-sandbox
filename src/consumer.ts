@@ -14,7 +14,7 @@ import {
 import type { ConsumerInfo, DeliveryInfo, JsMsg } from "./types.ts";
 import { pullSubject } from "./jsm.ts";
 
-const OK = Uint8Array.of(43, 79, 75);
+const ACK = Uint8Array.of(43, 65, 67, 75);
 const NAK = Uint8Array.of(45, 78, 65, 75);
 const WPI = Uint8Array.of(43, 87, 80, 73);
 const NXT = Uint8Array.of(43, 78, 88, 84);
@@ -75,8 +75,8 @@ export class JsMsgImpl implements JsMsg {
     return this.info.sseq;
   }
 
-  ok() {
-    this.msg.respond(OK);
+  ack() {
+    this.msg.respond(ACK);
   }
 
   nak() {
