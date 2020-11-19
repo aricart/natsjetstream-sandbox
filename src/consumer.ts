@@ -1,16 +1,11 @@
 import type {
   Msg,
   MsgHdrs,
+  NatsConnection,
   Subscription,
   SubscriptionOptions,
-  NatsConnection,
 } from "./nats-base-client.ts";
-import {
-  createInbox,
-  Empty,
-  TE,
-  QueuedIterator,
-} from "./nats-base-client.ts";
+import { createInbox, Empty, QueuedIterator, TE } from "./nats-base-client.ts";
 import type { ConsumerInfo, DeliveryInfo, JsMsg } from "./types.ts";
 import { pullSubject } from "./jsm.ts";
 
@@ -58,6 +53,7 @@ export class JsMsgImpl implements JsMsg {
       di.sseq = parseInt(tokens[5], 10);
       di.dseq = parseInt(tokens[6], 10);
       di.ts = parseInt(tokens[7], 10) / 1000000;
+      di.pending = parseInt(tokens[8], 10);
       this.di = di;
     }
     return this.di;

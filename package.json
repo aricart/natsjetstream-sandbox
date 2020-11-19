@@ -8,7 +8,7 @@
     "setup": "mkdir -p build && npm run setup:nats-server && npm run setup:jetstream-tools",
     "setup:nats-server": "rm -Rf build/nats-server && git clone  --branch=master https://github.com/nats-io/nats-server build/nats-server && cd build/nats-server && go build && cp nats-server ../../bin/",
     "setup:jetstream-tools": "rm -Rf build/jetstream && git clone https://github.com/nats-io/jetstream build/jetstream && cd build/jetstream/nats && go build && cp nats ../../../bin/",
-    "test": "nyc ava --verbose -T 15000",
+    "test": "deno test --allow-all --unstable",
     "fmt": "standard --fix 'src/**/*.js' 'test/**/*.js'"
   },
   "repository": {

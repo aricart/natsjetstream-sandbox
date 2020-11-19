@@ -1,24 +1,25 @@
+import { JSONCodec, NatsConnection } from "./nats-base-client.ts";
 import {
-  NatsConnection,
-  JSONCodec,
-} from "./nats-base-client.ts";
-import {
-  JSM,
+  AccountInfo,
   ConsumerAPI,
-  defaultConsumer,
+  ConsumerConfig,
   ConsumerInfo,
   Consumers,
-  ConsumerConfig,
+  defaultConsumer,
+  defaultStream,
   JetStreamError,
+  JSM,
   JSResponse,
+  ms,
   Stream,
   StreamAPI,
   StreamConfig,
-  defaultStream,
+  StreamMessage,
   StreamNames,
   Streams,
-  ms,
-  StreamMessage,
+  StreamTemplate,
+  StreamTemplateAPI,
+  StreamTemplateNames,
 } from "./types.ts";
 
 export function jsmClient(nc: NatsConnection): JSM {
@@ -33,11 +34,13 @@ export class JsmImpl implements JSM {
   nc: NatsConnection;
   streams: StreamAPI;
   consumers: ConsumerAPIImpl;
+  templates: StreamTemplateAPIImpl;
 
   constructor(ns: NatsConnection) {
     this.nc = ns;
     this.streams = new StreamAPIImpl(this);
     this.consumers = new ConsumerAPIImpl(this);
+    this.templates = new StreamTemplateAPIImpl(this);
   }
 
   async _request(subj: string, payload: any): Promise<object> {
@@ -53,6 +56,10 @@ export class JsmImpl implements JSM {
       throw new JetStreamError(r.error.code, r.error.description);
     }
     return data;
+  }
+
+  info(): Promise<AccountInfo> {
+    return this._request("$JS.API.INFO", undefined) as Promise<AccountInfo>;
   }
 }
 
@@ -139,7 +146,7 @@ export class StreamAPIImpl implements StreamAPI {
   }
 
   create(name: string, spec: StreamConfig = {}): Promise<Stream> {
-    const payload = Object.assign({}, defaultStream, { name: name }, spec);
+    const payload = Object.assign(defaultStream({}), { name: name }, spec);
     return this._request("create", payload.name, payload);
   }
 
@@ -184,6 +191,58 @@ export class StreamAPIImpl implements StreamAPI {
     m.set("delete", `$JS.API.STREAM.DELETE.${stream}`);
     m.set("purge", `$JS.API.STREAM.PURGE.${stream}`);
     m.set("get", `$JS.API.STREAM.MSG.GET.${stream}`);
+
+    const subject = m.get(verb);
+    if (!subject) {
+      return Promise.reject(`bad verb ${verb}`);
+    }
+
+    return this.jsm._request(subject, payload);
+  }
+}
+
+export class StreamTemplateAPIImpl implements StreamTemplateAPI {
+  jsm: JsmImpl;
+  constructor(jsm: JsmImpl) {
+    this.jsm = jsm;
+  }
+
+  create(
+    name: string,
+    max = 100,
+    spec?: StreamConfig,
+  ): Promise<StreamTemplate> {
+    const config = Object.assign(defaultStream({}), spec);
+    const payload = { name: name, max_streams: max, config: config };
+    return this._request("create", name, payload) as Promise<StreamTemplate>;
+  }
+
+  info(name: string): Promise<StreamTemplate> {
+    return this._request("info", name) as Promise<StreamTemplate>;
+  }
+
+  delete(name: string): Promise<any> {
+    return this._request("delete", name) as Promise<any>;
+  }
+
+  list(): Promise<StreamTemplateNames> {
+    return this._request("list");
+  }
+
+  _request(verb: string, template = "", payload?: any): Promise<any> {
+    if (!verb) {
+      return Promise.reject(new Error("verb is required"));
+    }
+
+    if (verb === "list") {
+      template = "";
+    }
+
+    const m = new Map<string, string>();
+    m.set("create", `$JS.API.STREAM.TEMPLATE.CREATE.${template}`);
+    m.set("delete", `$JS.API.STREAM.TEMPLATE.DELETE.${template}`);
+    m.set("info", `$JS.API.STREAM.TEMPLATE.INFO.${template}`);
+    m.set("list", `$JS.API.STREAM.TEMPLATE.NAMES`);
 
     const subject = m.get(verb);
     if (!subject) {

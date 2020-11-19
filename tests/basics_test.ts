@@ -1,40 +1,38 @@
 import {
   NatsServer,
-  Lock,
 } from "https://raw.githubusercontent.com/nats-io/nats.deno/main/tests/helpers/mod.ts";
 import {
   connect,
-  ErrorCode,
   createInbox,
-  StringCodec,
   JSONCodec,
+  StringCodec,
 } from "https://raw.githubusercontent.com/nats-io/nats.deno/main/src/mod.ts";
 import {
   assert,
   assertEquals,
 } from "https://deno.land/std@0.63.0/testing/asserts.ts";
 
-import {
-  defaultConsumer,
-  DeliverPolicy,
-  jsmClient,
-  JsMsg,
-} from "../src/mod.ts";
-import { JsMsgImpl, PullConsumer, PushConsumer } from "../src/consumer.ts";
-import { JsmImpl, pullSubject } from "../src/jsm.ts";
+import { defaultConsumer, jsmClient } from "../src/mod.ts";
+import { PullConsumer, PushConsumer } from "../src/consumer.ts";
+import { pullSubject } from "../src/jsm.ts";
+import { serverOpts } from "./util.ts";
 
-const jsopts = {
-  // debug: true,
-  // trace: true,
-  jetstream: {
-    max_memory_store: 1024 * 1024,
-    max_file_store: 1,
-    store_dir: "/tmp",
-  },
-};
+Deno.test("basics - info", async () => {
+  const opts = serverOpts()
+  const ns = await NatsServer.start(opts);
+  const nc = await connect({ port: ns.port });
+  const jsm = jsmClient(nc);
+  const d = await jsm.info();
+  const limits = d.limits ? d.limits : undefined
+  assert(limits)
+  assertEquals(limits.max_memory, opts.jetstream.max_memory_store)
+  assertEquals(limits.max_storage, opts.jetstream.max_file_store)
+  await nc.close();
+  await ns.stop();
+});
 
 Deno.test("basics - stream crud", async () => {
-  const ns = await NatsServer.start(jsopts);
+  const ns = await NatsServer.start(serverOpts());
   const nc = await connect({ port: ns.port });
   const jsm = jsmClient(nc);
 
@@ -77,7 +75,7 @@ Deno.test("basics - stream crud", async () => {
 });
 
 Deno.test("basics - manual consumer", async () => {
-  const ns = await NatsServer.start(jsopts);
+  const ns = await NatsServer.start(serverOpts());
   const nc = await connect({ port: ns.port });
   const jsm = jsmClient(nc);
 
@@ -95,9 +93,7 @@ Deno.test("basics - manual consumer", async () => {
 
   const sub = nc.subscribe(inbox, { max: 1 });
   const done = (async () => {
-    for await (const m of sub) {
-      console.log(sc.decode(m.data));
-    }
+    for await (const m of sub) {}
   })();
 
   nc.publish(subj, undefined, { reply: inbox });
@@ -110,7 +106,7 @@ Deno.test("basics - manual consumer", async () => {
 });
 
 Deno.test("basics - push consumer", async () => {
-  const ns = await NatsServer.start(jsopts);
+  const ns = await NatsServer.start(serverOpts());
   const nc = await connect({ port: ns.port });
   const jsm = jsmClient(nc);
 
@@ -124,7 +120,6 @@ Deno.test("basics - push consumer", async () => {
   const consumer = PushConsumer.fromConsumerInfo(nc, ci);
   const done = (async () => {
     for await (const jm of consumer) {
-      console.log(consumer.getProcessed(), sc.decode(jm.data));
       if (consumer.getProcessed() === 3) {
         consumer.sub.unsubscribe();
         break;
@@ -143,7 +138,7 @@ Deno.test("basics - push consumer", async () => {
 });
 
 Deno.test("basics - pull consumer", async () => {
-  const ns = await NatsServer.start(jsopts);
+  const ns = await NatsServer.start(serverOpts());
   const nc = await connect({ port: ns.port });
   const jsm = jsmClient(nc);
 
@@ -162,11 +157,11 @@ Deno.test("basics - pull consumer", async () => {
   const consumer = PullConsumer.fromConsumerInfo(nc, ci);
   const done = (async () => {
     for await (const jm of consumer) {
-      console.log(
-        `[${jm.seq} / ${consumer.getPending()}] ${
-          sc.decode(jm.data)
-        } - reply: ${jm.reply}`,
-      );
+      // console.log(
+      //   `[${jm.seq} / ${consumer.getPending()}] ${
+      //     sc.decode(jm.data)
+      //   } - reply: ${jm.reply}`,
+      // );
       if (consumer.getPending() <= 20) {
         jm.ack();
         await consumer.next(80);
@@ -221,3 +216,22 @@ Deno.test("basics - pull consumer", async () => {
 //
 //   nc.close();
 // });
+
+Deno.test("basics - create template", async () => {
+  const ns = await NatsServer.start(serverOpts());
+  const nc = await connect({ port: ns.port });
+  const jsm = jsmClient(nc);
+  await jsm.templates.create("FOOS", 100, { subjects: ["foo.>"] });
+
+  nc.publish("foo.one");
+
+  const list = await jsm.templates.list();
+  assertEquals(list.streams, ["FOOS"]);
+
+  const info = await jsm.templates.info("FOOS");
+  assertEquals(info.streams, ["foo_one"]);
+
+  await jsm.templates.delete("FOOS");
+  await nc.close();
+  await ns.stop();
+});

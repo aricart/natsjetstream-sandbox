@@ -5,6 +5,9 @@ import type {
 export interface JSM {
   streams: StreamAPI;
   consumers: ConsumerAPI;
+  templates: StreamTemplateAPI;
+
+  info(): Promise<AccountInfo>;
 }
 
 export interface ConsumerAPI {
@@ -21,6 +24,17 @@ export interface StreamAPI {
   purge(name: string): Promise<boolean>;
   info(name: string): Promise<Stream>;
   get(name: string, sequence: number): Promise<StreamMessage>;
+}
+
+export interface StreamTemplateAPI {
+  list(): Promise<StreamTemplateNames>;
+  delete(name: string): Promise<void>;
+  info(name: string): Promise<StreamTemplate>;
+  create(
+    name: string,
+    max: number,
+    spec?: StreamConfig,
+  ): Promise<StreamTemplate>;
 }
 
 export enum RetentionPolicy {
@@ -58,6 +72,18 @@ export enum ReplayPolicy {
   Original = "original",
 }
 
+export interface AccountInfo extends JSResponse {
+  memory: number;
+  storage: number;
+  streams: number;
+  limits: {
+    max_memory: number;
+    max_storage: number;
+    max_streams: number;
+    max_consumers: number;
+  };
+}
+
 export function defaultStream(opts: StreamConfig = {}): StreamConfig {
   return Object.assign({
     retention: RetentionPolicy.Limits,
@@ -65,6 +91,8 @@ export function defaultStream(opts: StreamConfig = {}): StreamConfig {
     max_msgs: -1,
     max_bytes: -1,
     max_age: 0,
+    max_msg_size: -1,
+    discard: DiscardPolicy.Old,
     storage: StorageType.Memory,
     replicas: 1,
     no_ack: false,
@@ -152,6 +180,7 @@ export interface ConsumerConfig {
   replay_policy?: ReplayPolicy;
   sample_freq?: string;
   rate_limit_bps?: number;
+  max_waiting?: number;
 }
 
 export function defaultConsumer(opts: ConsumerConfig = {}): ConsumerConfig {
@@ -180,6 +209,8 @@ export interface ConsumerInfo {
   ack_floor: SequencePair;
   num_pending: number;
   num_redelivered: number;
+  num_ack_pending: number;
+  num_waiting: number;
   created: number;
 }
 
@@ -210,6 +241,7 @@ export interface DeliveryInfo {
   sseq: number;
   dseq: number;
   ts: number;
+  pending: number;
 }
 
 export interface JsMsg {
@@ -227,4 +259,15 @@ export interface JsMsg {
   working(): void;
   next(): void;
   ignore(): void;
+}
+
+export interface StreamTemplateNames extends IterableResponse {
+  streams: string[];
+}
+
+export interface StreamTemplate extends JSResponse {
+  name: string;
+  max_streams: number;
+  streams: string[];
+  config: StreamConfig;
 }
